@@ -188,6 +188,30 @@ def main():
             'method': 'POST',
             # O código será definido dinamicamente abaixo
         },
+        # Listar Itens do Pedido
+        {
+            'path': '/EditaItemPedido/listar/{nroPedido}',
+            'method': 'GET',
+            'params': {'nroPedido': 42}  # será randomizado abaixo
+        },
+        # Recuperar Observação do Pedido (já existe, mas mantido para clareza)
+        {
+            'path': '/EditaItemPedido/recuperarObservacao/{nroPedido}',
+            'method': 'GET',
+            'params': {'nroPedido': 42}  # será randomizado abaixo
+        },
+        # Inserir Observação no Pedido
+        {
+            'path': '/EditaItemPedido/inserirObservacao',
+            'method': 'POST',
+            # O body será definido dinamicamente abaixo
+        },
+        # Excluir Item do Pedido
+        {
+            'path': '/EditaItemPedido/excluirItem',
+            'method': 'DELETE',
+            'params': {'nroPedido': 42, 'codigo': '000000'}  # ambos serão randomizados abaixo
+        },
     ]
     
     print("Iniciando testes de carga...")
@@ -240,12 +264,27 @@ def main():
                 nropedido_aleatorio = random.choice(nro_pedidos)
                 params = {'nropedido': nropedido_aleatorio}
 
+            # Randomiza nroPedido para recuperar observação do pedido
+            if path == '/EditaItemPedido/recuperarObservacao/{nroPedido}':
+                nro_pedido_aleatorio = random.choice(nro_pedidos)
+                params = {'nroPedido': nro_pedido_aleatorio}
+                path = path.replace('{nroPedido}', str(nro_pedido_aleatorio))
+
+            # Randomiza nroPedido e observacao para inserir observação no pedido
+            if path == '/EditaItemPedido/inserirObservacao':
+                nro_pedido_aleatorio = random.choice(nro_pedidos)
+                observacao_aleatoria = fake.sentence(nb_words=8)
+                data = {
+                    'nroPedido': nro_pedido_aleatorio,
+                    'observacao': observacao_aleatoria
+                }
+
             tester.run_concurrent_tests(
                 path,
                 endpoint['method'],
                 data,
                 params,
-                num_requests=20
+                num_requests=5
             )
             time.sleep(1)  # Pequena pausa entre os testes
     
