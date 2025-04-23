@@ -28,7 +28,8 @@ class APITester:
             'success': 0,
             'errors': 0,
             'total_time': 0,
-            'response_times': []
+            'response_times': [],
+            'success_responses': []  # <-- Adicionado para armazenar respostas de sucesso
         }
 
     def test_endpoint(self, endpoint: str, method: str = 'GET', data: Dict[str, Any] = None, params: Dict[str, Any] = None) -> tuple[bool, float]:
@@ -54,6 +55,12 @@ class APITester:
 
             if response.status_code in [200, 201, 204]:
                 self.results['success'] += 1
+                # Armazena o conteúdo da resposta de sucesso
+                try:
+                    self.results['success_responses'].append(response.json())
+                except Exception:
+                    self.results['success_responses'].append(response.text)
+                print(f"Resposta de sucesso do endpoint {endpoint}: {response.text}")
                 return True, response_time
             else:
                 self.results['errors'] += 1
@@ -243,6 +250,15 @@ def main():
             time.sleep(1)  # Pequena pausa entre os testes
     
     tester.print_results()
+
+    # === NOVO BLOCO PARA SALVAR RESULTADOS ===
+    from datetime import datetime
+    import json
+    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"resultado_teste_{now}.json"
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(tester.results, f, ensure_ascii=False, indent=2)
+    print(f"\nResultados salvos em: {filename}")
 
 if __name__ == "__main__":
     main()
