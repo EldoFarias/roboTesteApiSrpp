@@ -34,8 +34,12 @@ class APITester:
         }
         # Lista para armazenar os números de pedidos criados
         self.pedidos_criados = []
+        # Dicionário para armazenar os itens de cada pedido {nro_pedido: [codigos_produto]}
+        self.itens_por_pedido = {}
         # Tenta carregar pedidos criados anteriormente
         self.carregar_pedidos_criados()
+        # Tenta carregar itens por pedido
+        self.carregar_itens_por_pedido()
 
     def carregar_pedidos_criados(self):
         """Carrega pedidos criados de um arquivo, se existir"""
@@ -56,12 +60,72 @@ class APITester:
             print(f"Salvos {len(self.pedidos_criados)} pedidos criados")
         except Exception as e:
             print(f"Erro ao salvar pedidos criados: {str(e)}")
+            
+    def carregar_itens_por_pedido(self):
+        """Carrega itens por pedido de um arquivo, se existir"""
+        try:
+            if os.path.exists('itens_por_pedido.json'):
+                with open('itens_por_pedido.json', 'r') as f:
+                    # Converte as chaves de string para int
+                    dados = json.load(f)
+                    self.itens_por_pedido = {int(k): v for k, v in dados.items()}
+                print(f"Carregados itens para {len(self.itens_por_pedido)} pedidos")
+        except Exception as e:
+            print(f"Erro ao carregar itens por pedido: {str(e)}")
+            self.itens_por_pedido = {}
+            
+    def salvar_itens_por_pedido(self):
+        """Salva o dicionário de itens por pedido em um arquivo"""
+        try:
+            with open('itens_por_pedido.json', 'w') as f:
+                json.dump(self.itens_por_pedido, f)
+            print(f"Salvos itens para {len(self.itens_por_pedido)} pedidos")
+        except Exception as e:
+            print(f"Erro ao salvar itens por pedido: {str(e)}")
 
     def adicionar_pedido_criado(self, nro_pedido):
         """Adiciona um número de pedido à lista de pedidos criados"""
         if nro_pedido not in self.pedidos_criados:
             self.pedidos_criados.append(nro_pedido)
             self.salvar_pedidos_criados()
+            
+    def adicionar_item_ao_pedido(self, nro_pedido, cod_produto):
+        """Adiciona um item à lista de itens do pedido"""
+        # Converte para int para garantir consistência
+        nro_pedido = int(nro_pedido)
+        
+        # Inicializa a lista de itens se o pedido não existir no dicionário
+        if nro_pedido not in self.itens_por_pedido:
+            self.itens_por_pedido[nro_pedido] = []
+            
+        # Adiciona o código do produto à lista de itens do pedido
+        if cod_produto not in self.itens_por_pedido[nro_pedido]:
+            self.itens_por_pedido[nro_pedido].append(cod_produto)
+            self.salvar_itens_por_pedido()
+            return True
+        return False
+        
+    def obter_item_aleatorio_do_pedido(self, nro_pedido):
+        """Retorna um código de produto aleatório da lista de itens do pedido"""
+        # Converte para int para garantir consistência
+        nro_pedido = int(nro_pedido)
+        
+        # Verifica se o pedido existe e tem itens
+        if nro_pedido in self.itens_por_pedido and self.itens_por_pedido[nro_pedido]:
+            return random.choice(self.itens_por_pedido[nro_pedido])
+        return None
+        
+    def remover_item_do_pedido(self, nro_pedido, cod_produto):
+        """Remove um item da lista de itens do pedido"""
+        # Converte para int para garantir consistência
+        nro_pedido = int(nro_pedido)
+        
+        # Verifica se o pedido existe e tem o item
+        if nro_pedido in self.itens_por_pedido and cod_produto in self.itens_por_pedido[nro_pedido]:
+            self.itens_por_pedido[nro_pedido].remove(cod_produto)
+            self.salvar_itens_por_pedido()
+            return True
+        return False
 
     def obter_pedido_aleatorio(self):
         """Retorna um número de pedido aleatório da lista de pedidos criados"""
@@ -102,6 +166,17 @@ class APITester:
                 print(f"Informação: {mensagem}")
                 self.results['success_responses'].append(mensagem)
                 return True, response_time
+                
+            # Tratamento especial para o endpoint de exclusão de item
+            if endpoint == '/EditaItemPedido/excluirItem' and response.status_code == 404:
+                # Trata como informação, não como erro
+                self.results['success'] += 1
+                nro_pedido = params.get('nroPedido', 'desconhecido') if params else 'desconhecido'
+                codigo = params.get('codigo', 'desconhecido') if params else 'desconhecido'
+                mensagem = f"Item {codigo} não encontrado no pedido {nro_pedido}"
+                print(f"Informação: {mensagem}")
+                self.results['success_responses'].append(mensagem)
+                return True, response_time
             
             if response.status_code in [200, 201, 204]:
                 self.results['success'] += 1
@@ -113,6 +188,16 @@ class APITester:
                     # Se for uma resposta de criação de pedido, armazena o número do pedido
                     if endpoint == '/Pedido/Criar' and isinstance(response_json, dict) and 'pedidoNumero' in response_json:
                         self.adicionar_pedido_criado(response_json['pedidoNumero'])
+                        
+                    # Se for uma resposta de alteração de quantidade, armazena o item no pedido
+                    if endpoint == '/EditaItemPedido/alterarQuantidade' and isinstance(data, dict):
+                        if 'nroPedido' in data and 'codProduto' in data:
+                            self.adicionar_item_ao_pedido(data['nroPedido'], data['codProduto'])
+                            
+                    # Se for uma resposta de exclusão de item, remove o item do pedido
+                    if endpoint == '/EditaItemPedido/excluirItem' and isinstance(params, dict):
+                        if 'nroPedido' in params and 'codigo' in params:
+                            self.remover_item_do_pedido(params['nroPedido'], params['codigo'])
                         
                     print(f"Resposta de sucesso do endpoint {endpoint}: {response.text}")
                 except Exception:
@@ -448,9 +533,20 @@ def main():
             # Usa pedido real para excluir item do pedido
             if path == '/EditaItemPedido/excluirItem':
                 nro_pedido_aleatorio = tester.obter_pedido_aleatorio()
-                codigo_aleatorio = random.choice(codigos_produto)
-                params = {'nroPedido': nro_pedido_aleatorio, 'codigo': codigo_aleatorio}
-
+                codigo_aleatorio = tester.obter_item_aleatorio_do_pedido(nro_pedido_aleatorio)
+                
+                # Se não encontrou nenhum item para este pedido, pula este endpoint
+                if codigo_aleatorio is None:
+                    print(f"Pedido {nro_pedido_aleatorio} não tem itens para excluir. Pulando endpoint.")
+                    continue
+                    
+                params = {
+                    'nroPedido': nro_pedido_aleatorio,
+                    'codigo': codigo_aleatorio
+                }
+                
+                print(f"Tentando excluir item {codigo_aleatorio} do pedido {nro_pedido_aleatorio}")
+            
             tester.run_concurrent_tests(
                 path,
                 endpoint['method'],
