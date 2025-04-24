@@ -212,6 +212,18 @@ def main():
             'method': 'DELETE',
             'params': {'nroPedido': 42, 'codigo': '000000'}  # ambos serão randomizados abaixo
         },
+        # Alterar Quantidade do Item no Pedido
+        {
+            'path': '/EditaItemPedido/alterarQuantidade',
+            'method': 'POST',
+            # O body será definido dinamicamente abaixo
+        },
+        # Fechar Pedido
+        {
+            'path': '/EditaItemPedido/fecharPedido',
+            'method': 'POST',
+            # O body será definido dinamicamente abaixo
+        },
     ]
     
     print("Iniciando testes de carga...")
@@ -278,13 +290,45 @@ def main():
                     'nroPedido': nro_pedido_aleatorio,
                     'observacao': observacao_aleatoria
                 }
+                
+            # Randomiza dados para alterar quantidade do item no pedido
+            if path == '/EditaItemPedido/alterarQuantidade':
+                nro_pedido_aleatorio = random.randint(1, 1000)
+                cod_cliente_aleatorio = random.choice(cod_clientes)
+                cod_produto_aleatorio = random.choice(codigos_produto)
+                qtd_vendida_aleatoria = random.randint(1, 500)
+                desconto_individual_aleatorio = round(random.uniform(1.0, 20.0), 2)
+                
+                data = {
+                    'nroPedido': nro_pedido_aleatorio,
+                    'codCliente': cod_cliente_aleatorio,
+                    'codProduto': cod_produto_aleatorio,
+                    'qtdVendida': qtd_vendida_aleatoria,
+                    'descontoIndividual': desconto_individual_aleatorio,
+                    'tabelaPreco': 1,
+                    'codCondPagamento': 711,
+                    'codTransportadora': 1,
+                    'tipoOperacao': 1
+                }
+
+            # Randomiza dados para fechar pedido
+            if path == '/EditaItemPedido/fecharPedido':
+                nro_pedido_aleatorio = random.choice(nro_pedidos)
+                cod_cliente_aleatorio = random.choice(cod_clientes)
+                
+                data = {
+                    'nroPedido': nro_pedido_aleatorio,
+                    'codCliente': cod_cliente_aleatorio,
+                    'codCondPagamento': 711,
+                    'codTransportadora': 1
+                }
 
             tester.run_concurrent_tests(
                 path,
                 endpoint['method'],
                 data,
                 params,
-                num_requests=5
+                num_requests=100
             )
             time.sleep(1)  # Pequena pausa entre os testes
     
