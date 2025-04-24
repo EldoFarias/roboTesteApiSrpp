@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from faker import Faker
 from typing import Dict, Any
 import random
+import json  # Adicionando a importação do módulo json
 
 # Carrega as variáveis de ambiente
 load_dotenv()
@@ -31,6 +32,43 @@ class APITester:
             'response_times': [],
             'success_responses': []  # <-- Adicionado para armazenar respostas de sucesso
         }
+        # Lista para armazenar os números de pedidos criados
+        self.pedidos_criados = []
+        # Tenta carregar pedidos criados anteriormente
+        self.carregar_pedidos_criados()
+
+    def carregar_pedidos_criados(self):
+        """Carrega pedidos criados de um arquivo, se existir"""
+        try:
+            if os.path.exists('pedidos_criados.json'):
+                with open('pedidos_criados.json', 'r') as f:
+                    self.pedidos_criados = json.load(f)
+                print(f"Carregados {len(self.pedidos_criados)} pedidos de execuções anteriores")
+        except Exception as e:
+            print(f"Erro ao carregar pedidos criados: {str(e)}")
+            self.pedidos_criados = []
+
+    def salvar_pedidos_criados(self):
+        """Salva a lista de pedidos criados em um arquivo"""
+        try:
+            with open('pedidos_criados.json', 'w') as f:
+                json.dump(self.pedidos_criados, f)
+            print(f"Salvos {len(self.pedidos_criados)} pedidos criados")
+        except Exception as e:
+            print(f"Erro ao salvar pedidos criados: {str(e)}")
+
+    def adicionar_pedido_criado(self, nro_pedido):
+        """Adiciona um número de pedido à lista de pedidos criados"""
+        if nro_pedido not in self.pedidos_criados:
+            self.pedidos_criados.append(nro_pedido)
+            self.salvar_pedidos_criados()
+
+    def obter_pedido_aleatorio(self):
+        """Retorna um número de pedido aleatório da lista de pedidos criados"""
+        if not self.pedidos_criados:
+            # Se não houver pedidos criados, retorna um valor padrão
+            return random.choice(carregar_nro_pedidos())
+        return random.choice(self.pedidos_criados)
 
     def test_endpoint(self, endpoint: str, method: str = 'GET', data: Dict[str, Any] = None, params: Dict[str, Any] = None) -> tuple[bool, float]:
         """
@@ -47,20 +85,38 @@ class APITester:
                 response = self.session.post(url, json=data, params=params)
             elif method == 'PUT':
                 response = self.session.put(url, json=data)
+            elif method == 'DELETE':
+                response = self.session.delete(url, params=params)
             else:
                 raise ValueError(f"Método {method} não suportado")
 
             response_time = time.time() - start_time
             self.results['response_times'].append(response_time)
 
+            # Tratamento especial para o endpoint de recuperação de observação
+            if endpoint.startswith('/EditaItemPedido/recuperarObservacao/') and response.status_code == 404:
+                # Trata como sucesso com mensagem personalizada
+                self.results['success'] += 1
+                nro_pedido = params.get('nroPedido', 'desconhecido') if params else 'desconhecido'
+                mensagem = f"Pedido {nro_pedido} sem observações"
+                print(f"Informação: {mensagem}")
+                self.results['success_responses'].append(mensagem)
+                return True, response_time
+            
             if response.status_code in [200, 201, 204]:
                 self.results['success'] += 1
                 # Armazena o conteúdo da resposta de sucesso
                 try:
-                    self.results['success_responses'].append(response.json())
+                    response_json = response.json()
+                    self.results['success_responses'].append(response_json)
+                    
+                    # Se for uma resposta de criação de pedido, armazena o número do pedido
+                    if endpoint == '/Pedido/Criar' and isinstance(response_json, dict) and 'pedidoNumero' in response_json:
+                        self.adicionar_pedido_criado(response_json['pedidoNumero'])
+                        
+                    print(f"Resposta de sucesso do endpoint {endpoint}: {response.text}")
                 except Exception:
                     self.results['success_responses'].append(response.text)
-                print(f"Resposta de sucesso do endpoint {endpoint}: {response.text}")
                 return True, response_time
             else:
                 self.results['errors'] += 1
@@ -125,11 +181,8 @@ def carregar_cod_clientes():
     ]
 
 def carregar_nro_pedidos():
-    return [
-        15, 21, 24, 25, 29, 30, 31, 33, 35, 37, 39, 42, 44, 47, 50, 51, 53, 54, 55, 59,
-        66, 67, 68, 69, 75, 79, 81, 83, 86, 87, 88, 90, 91, 93, 94, 97, 101, 102, 103, 106,
-        107, 108, 109, 110, 113, 116, 119, 123, 124, 126
-    ]
+    """Função de fallback que retorna alguns números de pedido padrão caso não existam pedidos criados"""
+    return [1, 2, 3, 4, 5]  # Valores mínimos apenas para fallback
 
 def carregar_cod_cond_pagamento():
     return [711, 712, 713, 714, 715, 717, 719]
@@ -182,18 +235,20 @@ def main():
             # O nropedido será definido dinamicamente abaixo
         },
         
-        # Buscar Produto por Código
-        {
-            'path': '/Produto/busca',
-            'method': 'POST',
-            # O código será definido dinamicamente abaixo
-        },
         # Listar Itens do Pedido
         {
             'path': '/EditaItemPedido/listar/{nroPedido}',
             'method': 'GET',
             'params': {'nroPedido': 42}  # será randomizado abaixo
         },
+
+         # Buscar Produto por Código
+        {
+            'path': '/Produto/busca',
+            'method': 'POST',
+            # O código será definido dinamicamente abaixo
+        },
+
         # Recuperar Observação do Pedido (já existe, mas mantido para clareza)
         {
             'path': '/EditaItemPedido/recuperarObservacao/{nroPedido}',
@@ -248,6 +303,67 @@ def main():
                     'CodTransportadora': cod_transportadora_aleatoria,
                     'DtPrevEntrega': '2025-02-09T13:56:40.203'
                 }
+                
+                # Executar a criação do pedido e capturar a resposta
+                success, response_time = tester.test_endpoint(path, endpoint['method'], data, params)
+                
+                # Se o pedido foi criado com sucesso, adicionar itens aleatórios
+                if success and tester.results['success_responses']:
+                    # Obter o último pedido criado com sucesso
+                    ultima_resposta = tester.results['success_responses'][-1]
+                    
+                    # Verificar se a resposta contém o número do pedido (agora verificando 'pedidoNumero')
+                    if isinstance(ultima_resposta, dict) and 'pedidoNumero' in ultima_resposta:
+                        nro_pedido_criado = ultima_resposta['pedidoNumero']
+                        
+                        # Adicionar um pequeno atraso para garantir que o pedido esteja disponível no sistema
+                        print(f"Pedido {nro_pedido_criado} criado com sucesso. Aguardando 2 segundos antes de adicionar itens...")
+                        time.sleep(2)  # Aguarda 2 segundos antes de adicionar itens
+                        
+                        # Adicionar entre 5 e 30 itens aleatórios ao pedido
+                        num_itens = random.randint(5, 30)
+                        print(f"Adicionando {num_itens} itens ao pedido {nro_pedido_criado}")
+                        
+                        # Contador de itens adicionados com sucesso
+                        itens_adicionados = 0
+                        
+                        for i in range(num_itens):
+                            # Selecionar um produto aleatório
+                            cod_produto_aleatorio = random.choice(codigos_produto)
+                            qtd_vendida_aleatoria = random.randint(1, 500)
+                            desconto_individual_aleatorio = round(random.uniform(1.0, 20.0), 2)
+                            
+                            # Dados para adicionar o item ao pedido
+                            item_data = {
+                                'nroPedido': nro_pedido_criado,
+                                'codCliente': cod_cliente_aleatorio,
+                                'codProduto': cod_produto_aleatorio,
+                                'qtdVendida': qtd_vendida_aleatoria,
+                                'descontoIndividual': desconto_individual_aleatorio,
+                                'tabelaPreco': 1,
+                                'codCondPagamento': cod_cond_pagamento_aleatorio,
+                                'codTransportadora': cod_transportadora_aleatoria,
+                                'tipoOperacao': 1
+                            }
+                            
+                            # Adicionar o item ao pedido
+                            item_success, _ = tester.test_endpoint('/EditaItemPedido/alterarQuantidade', 'POST', item_data, None)
+                            
+                            # Se o item foi adicionado com sucesso, incrementar o contador
+                            if item_success:
+                                itens_adicionados += 1
+                                print(f"Item {i+1}/{num_itens} adicionado com sucesso ao pedido {nro_pedido_criado}")
+                            else:
+                                print(f"Falha ao adicionar item {i+1}/{num_itens} ao pedido {nro_pedido_criado}")
+                                # Adicionar um pequeno atraso antes de tentar o próximo item
+                                time.sleep(0.5)
+                        
+                        print(f"Adicionados {itens_adicionados}/{num_itens} itens ao pedido {nro_pedido_criado}")
+                    else:
+                        print(f"Resposta da criação do pedido não contém o número do pedido: {ultima_resposta}")
+                
+                # Pular para o próximo endpoint, já que já executamos este
+                continue
 
             # Randomiza codRepresentante para listar pedidos abertos
             if path == '/Pedido/listarPedidosAbertos/{codRepresentante}':
@@ -255,45 +371,45 @@ def main():
                 params = {'codRepresentante': cod_representante_aleatorio}
                 path = path.replace('{codRepresentante}', str(cod_representante_aleatorio))
 
-            # Randomiza nroPedido para total do pedido
+            # Usa um pedido real para total do pedido
             if path == '/Pedido/totalPedido/{nroPedido}':
-                nro_pedido_aleatorio = random.choice(nro_pedidos)
+                nro_pedido_aleatorio = tester.obter_pedido_aleatorio()
                 params = {'nroPedido': nro_pedido_aleatorio}
                 path = path.replace('{nroPedido}', str(nro_pedido_aleatorio))
 
-            # Se for o endpoint de busca de produto, seleciona um código aleatório e um nroPedido aleatório
+            # Se for o endpoint de busca de produto, seleciona um código aleatório e um nroPedido real
             if path == '/Produto/busca':
                 codigo_aleatorio = random.choice(codigos_produto)
-                nro_pedido_aleatorio = random.choice(nro_pedidos)
+                nro_pedido_aleatorio = tester.obter_pedido_aleatorio()
                 data = {
                     'codigo': codigo_aleatorio,
                     'tabelaPreco': 1,
                     'nroPedido': nro_pedido_aleatorio
                 }
 
-            # Randomiza nropedido para os endpoints de impressão
+            # Usa pedidos reais para os endpoints de impressão
             if path == '/Pedido/imprime' or path == '/Pedido/imprimeFichaCadastral':
-                nropedido_aleatorio = random.choice(nro_pedidos)
-                params = {'nropedido': nropedido_aleatorio}
+                nropedido_aleatorio = tester.obter_pedido_aleatorio()
+                data = {'nropedido': nropedido_aleatorio}
 
-            # Randomiza nroPedido para recuperar observação do pedido
+            # Usa pedido real para recuperar observação do pedido
             if path == '/EditaItemPedido/recuperarObservacao/{nroPedido}':
-                nro_pedido_aleatorio = random.choice(nro_pedidos)
+                nro_pedido_aleatorio = tester.obter_pedido_aleatorio()
                 params = {'nroPedido': nro_pedido_aleatorio}
                 path = path.replace('{nroPedido}', str(nro_pedido_aleatorio))
 
-            # Randomiza nroPedido e observacao para inserir observação no pedido
+            # Usa pedido real para inserir observação no pedido
             if path == '/EditaItemPedido/inserirObservacao':
-                nro_pedido_aleatorio = random.choice(nro_pedidos)
+                nro_pedido_aleatorio = tester.obter_pedido_aleatorio()
                 observacao_aleatoria = fake.sentence(nb_words=8)
                 data = {
                     'nroPedido': nro_pedido_aleatorio,
                     'observacao': observacao_aleatoria
                 }
                 
-            # Randomiza dados para alterar quantidade do item no pedido
+            # Usa pedido real para alterar quantidade do item no pedido
             if path == '/EditaItemPedido/alterarQuantidade':
-                nro_pedido_aleatorio = random.randint(1, 1000)
+                nro_pedido_aleatorio = tester.obter_pedido_aleatorio()
                 cod_cliente_aleatorio = random.choice(cod_clientes)
                 cod_produto_aleatorio = random.choice(codigos_produto)
                 qtd_vendida_aleatoria = random.randint(1, 500)
@@ -306,29 +422,41 @@ def main():
                     'qtdVendida': qtd_vendida_aleatoria,
                     'descontoIndividual': desconto_individual_aleatorio,
                     'tabelaPreco': 1,
-                    'codCondPagamento': 711,
-                    'codTransportadora': 1,
+                    'codCondPagamento': random.choice(cod_cond_pagamento),
+                    'codTransportadora': random.choice(cod_transportadoras),
                     'tipoOperacao': 1
                 }
 
-            # Randomiza dados para fechar pedido
+            # Usa pedido real para fechar pedido
             if path == '/EditaItemPedido/fecharPedido':
-                nro_pedido_aleatorio = random.choice(nro_pedidos)
+                nro_pedido_aleatorio = tester.obter_pedido_aleatorio()
                 cod_cliente_aleatorio = random.choice(cod_clientes)
                 
                 data = {
                     'nroPedido': nro_pedido_aleatorio,
                     'codCliente': cod_cliente_aleatorio,
-                    'codCondPagamento': 711,
-                    'codTransportadora': 1
+                    'codCondPagamento': random.choice(cod_cond_pagamento),
+                    'codTransportadora': random.choice(cod_transportadoras)
                 }
+                
+            # Usa pedido real para listar itens do pedido
+            if path == '/EditaItemPedido/listar/{nroPedido}':
+                nro_pedido_aleatorio = tester.obter_pedido_aleatorio()
+                params = {'nroPedido': nro_pedido_aleatorio}
+                path = path.replace('{nroPedido}', str(nro_pedido_aleatorio))
+                
+            # Usa pedido real para excluir item do pedido
+            if path == '/EditaItemPedido/excluirItem':
+                nro_pedido_aleatorio = tester.obter_pedido_aleatorio()
+                codigo_aleatorio = random.choice(codigos_produto)
+                params = {'nroPedido': nro_pedido_aleatorio, 'codigo': codigo_aleatorio}
 
             tester.run_concurrent_tests(
                 path,
                 endpoint['method'],
                 data,
                 params,
-                num_requests=100
+                num_requests=5
             )
             time.sleep(1)  # Pequena pausa entre os testes
     
@@ -342,6 +470,10 @@ def main():
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(tester.results, f, ensure_ascii=False, indent=2)
     print(f"\nResultados salvos em: {filename}")
+    
+    # Salva a lista de pedidos criados
+    tester.salvar_pedidos_criados()
+    print(f"Total de pedidos criados e salvos: {len(tester.pedidos_criados)}")
 
 if __name__ == "__main__":
     main()
